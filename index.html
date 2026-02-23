@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RentMap PH - Pin Locations</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+            z-index: 1;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .sidebar {
+            transition: transform 0.3s ease-in-out;
+        }
+
+        /* Mobile adaptation */
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column-reverse;
+            }
+            .sidebar {
+                width: 100%;
+                height: 45vh;
+                position: relative;
+                z-index: 20;
+            }
+            #map-container {
+                height: 55vh;
+            }
+        }
+
+        /* Leaflet Popup Styling */
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        .leaflet-popup-content {
+            font-family: 'Inter', sans-serif;
+            margin: 12px;
+            font-weight: 500;
+        }
+
+        /* Map Label (Tooltip) Styling */
+        .map-label {
+            background: rgba(255, 255, 255, 0.9) !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-size: 11px;
+            color: #1e293b;
+            padding: 2px 8px;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip-top:before {
+            border-top-color: rgba(255, 255, 255, 0.9);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- App Container -->
+    <div class="flex h-full w-full relative overflow-hidden">
+        
+        <!-- Sidebar / Control Panel -->
+        <div class="sidebar w-96 h-full glass-panel flex flex-col border-r border-gray-200 z-20 absolute md:relative shadow-xl md:shadow-none">
+            
+            <!-- Header -->
+            <div class="p-6 border-b border-gray-100 bg-white">
+                <div class="flex items-center gap-2 text-indigo-600 mb-1">
+                    <i data-lucide="map-pin" class="w-6 h-6 fill-current"></i>
+                    <h1 class="text-xl font-bold tracking-tight text-gray-900">RentMap PH</h1>
+                </div>
+                <p class="text-xs text-gray-500">Find and pin rentals across the Philippines.</p>
+                <!-- INCREASED WIDTH FOR ERROR MESSAGES -->
+                <div id="auth-status" class="mt-2 text-[10px] text-gray-400 flex items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <div class="w-2 h-2 rounded-full bg-gray-300"></div> Connecting...
+                </div>
+            </div>
+
+            <!-- Search Input -->
+            <div class="p-6 pb-2">
+                <form id="location-form" class="relative">
+                    <div class="relative">
+                        <i data-lucide="search" class="absolute left-3 top-3 w-5 h-5 text-gray-400"></i>
+                        <input 
+                            type="text" 
+                            id="location-input" 
+                            placeholder="Exact address (e.g. 19 Rincon Rd, Valenzuela)..." 
+                            class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-sm shadow-sm"
+                            autocomplete="off"
+                        >
+                    </div>
+                    <button 
+                        type="submit" 
+                        class="mt-3 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
+                    >
+                        <span>Pin Location</span>
+                        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                    <p id="error-msg" class="text-red-500 text-xs mt-2 hidden text-center"></p>
+                </form>
+            </div>
+
+            <!-- Location List -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-3" id="locations-list">
+                <!-- Empty State -->
+                <div id="empty-state" class="text-center py-10 opacity-50">
+                    <i data-lucide="compass" class="w-12 h-12 mx-auto text-gray-300 mb-2"></i>
+                    <p class="text-sm text-gray-400">Loading map data...</p>
+                </div>
+                <!-- Items will be injected here -->
+            </div>
+            
+            <!-- Footer -->
+            <div class="p-4 border-t border-gray-100 bg-gray-50 text-center text-[10px] text-gray-400">
+                Powered by OpenStreetMap, Leaflet & Firebase
+            </div>
+        </div>
+
+        <!-- Map Area -->
+        <div id="map-container" class="flex-1 relative h-full">
+            <div id="map"></div>
+            
+            <!-- Map Controls Overlay -->
+            <button onclick="resetMap()" class="absolute top-4 right-4 z-[400] bg-white p-2 rounded-lg shadow-md hover:bg-gray-50 transition-colors text-gray-600" title="Reset View to Metro Manila">
+                <i data-lucide="globe-2" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script type="module">
+        /* ------------------------------------------------------------------
+        FIREBASE SECURITY RULES (Copy to Firebase Console > Firestore > Rules)
+        ------------------------------------------------------------------
+        rules_version = '2';
+        service cloud.firestore {
+          match /databases/{database}/documents {
+            // RentMap Collection
+            match /artifacts/{appId}/public/data/rentmap/{document=**} {
+              allow read: if true;
+              allow write: if request.auth != null;
+            }
+          }
+        }
+        ------------------------------------------------------------------
+        */
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, deleteDoc, updateDoc, doc, onSnapshot, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- 1. Firebase Configuration & Init ---
+        let firebaseConfig;
+        let appId = 'rentmap-ph'; // Default ID for manual use
+
+        // Determine if we are in Gemini or External
+        if (typeof __firebase_config !== 'undefined') {
+            // Internal Gemini Environment
+            firebaseConfig = JSON.parse(__firebase_config);
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        } else {
+            // --- CONFIGURATION FOR EXTERNAL USE (W3Schools, Local, etc.) ---
+            firebaseConfig = {
+                apiKey: "AIzaSyBJhEWSJ8Tz2DBwychFeQVlhXCYD1D8YLY",
+                authDomain: "ojt-pulse-tracker-backen-160ad.firebaseapp.com",
+                projectId: "ojt-pulse-tracker-backen-160ad",
+                storageBucket: "ojt-pulse-tracker-backen-160ad.firebasestorage.app",
+                messagingSenderId: "859757491435",
+                appId: "1:859757491435:web:0737b9c1f9380628b03aae"
+            };
+        }
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // State
+        let currentUser = null;
+        let mapMarkers = {}; // Object to store marker references by doc ID
+        const PH_CENTER = [14.6091, 121.0223]; // Metro Manila Center
+        const PH_ZOOM = 11;
+
+        // --- 2. Initialize Map (Philippines Focus) ---
+        const map = L.map('map', {
+            zoomControl: false
+        }).setView(PH_CENTER, PH_ZOOM);
+
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // --- 3. UI Elements ---
+        const locationForm = document.getElementById('location-form');
+        const locationInput = document.getElementById('location-input');
+        const locationsList = document.getElementById('locations-list');
+        const emptyState = document.getElementById('empty-state');
+        const errorMsg = document.getElementById('error-msg');
+        const authStatus = document.getElementById('auth-status');
+
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // --- 4. Auth & Firestore Logic ---
+        
+        // Helper to update status text
+        function setStatus(msg, type = 'neutral') {
+            const color = type === 'success' ? 'bg-green-500' : (type === 'error' ? 'bg-red-500' : 'bg-gray-300');
+            const textColor = type === 'error' ? 'text-red-500' : 'text-gray-400';
+            authStatus.innerHTML = `<div class="min-w-[8px] h-2 rounded-full ${color}"></div> <span class="${textColor}">${msg}</span>`;
+        }
+
+        // Auth Listener
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                setStatus("Connected", 'success');
+                subscribeToRentals();
+            } else {
+                currentUser = null;
+                // If we are stuck here without a user, it might be mid-load or failed
+            }
+        });
+
+        // Initialize Auth
+        async function initAuth() {
+            try {
+                setStatus("Authenticating...");
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth Error:", error);
+                
+                // Show specific helpful errors
+                if (error.code === 'auth/operation-not-allowed') {
+                    setStatus("Error: Enable 'Anonymous' in Firebase Auth Console", 'error');
+                } else if (error.code === 'auth/configuration-not-found' || error.message.includes("Missing Config")) {
+                    setStatus("Error: Missing Firebase Config (See Code)", 'error');
+                } else {
+                    setStatus(`Error: ${error.code || error.message}`, 'error');
+                }
+            }
+        }
+        initAuth();
+
+        // Real-time Data Listener
+        function subscribeToRentals() {
+            if (!currentUser) return;
+
+            // Using the 'rentmap' collection name as requested
+            // Path structure: artifacts/{appId}/public/data/rentmap
+            const rentalsRef = collection(db, 'artifacts', appId, 'public', 'data', 'rentmap');
+            
+            // Simple query for all docs (client-side sorting is safer without indexes)
+            const q = query(rentalsRef);
+
+            onSnapshot(q, (snapshot) => {
+                updateUI(snapshot.docs);
+            }, (error) => {
+                console.error("Firestore Error:", error);
+                errorMsg.textContent = "Error loading map data.";
+                errorMsg.classList.remove('hidden');
+            });
+        }
+
+        function updateUI(docs) {
+            // Sort client-side by timestamp (newest first)
+            const sortedDocs = docs.sort((a, b) => {
+                const timeA = a.data().createdAt?.seconds || 0;
+                const timeB = b.data().createdAt?.seconds || 0;
+                return timeB - timeA;
+            });
+
+            // 1. Clear List
+            locationsList.innerHTML = '';
+
+            // 2. Identify removed markers
+            const currentDocIds = new Set(sortedDocs.map(d => d.id));
+            Object.keys(mapMarkers).forEach(id => {
+                if (!currentDocIds.has(id)) {
+                    map.removeLayer(mapMarkers[id]);
+                    delete mapMarkers[id];
+                }
+            });
+
+            if (sortedDocs.length === 0) {
+                emptyState.innerHTML = `
+                    <i data-lucide="compass" class="w-12 h-12 mx-auto text-gray-300 mb-2"></i>
+                    <p class="text-sm text-gray-400">No rentals pinned yet.</p>
+                `;
+                emptyState.style.display = 'block';
+                locationsList.appendChild(emptyState);
+                lucide.createIcons();
+                return;
+            } else {
+                emptyState.style.display = 'none';
+            }
+
+            sortedDocs.forEach(docSnap => {
+                const data = docSnap.data();
+                const id = docSnap.id;
+
+                // Add/Update Marker
+                if (!mapMarkers[id]) {
+                    const marker = L.marker([data.lat, data.lon]).addTo(map);
+                    
+                    // Bind Popup
+                    marker.bindPopup(`<b>${data.name}</b><br><span class="text-xs text-gray-500">${data.address}</span>`);
+                    
+                    // Bind Tooltip (Label)
+                    marker.bindTooltip(data.name, {
+                        permanent: true,
+                        direction: 'top',
+                        className: 'map-label',
+                        offset: [-14, 0] // Moves label above the pin
+                    });
+
+                    mapMarkers[id] = marker;
+                } else {
+                    // Update content if changed
+                    const marker = mapMarkers[id];
+                    
+                    // Only update if content changed to avoid flicker
+                    if (marker.getPopup().getContent().indexOf(data.name) === -1) {
+                        marker.setPopupContent(`<b>${data.name}</b><br><span class="text-xs text-gray-500">${data.address}</span>`);
+                        marker.setTooltipContent(data.name);
+                    }
+                }
+
+                // Add to Sidebar List
+                const item = document.createElement('div');
+                item.className = "bg-white p-3 rounded-lg border border-gray-100 shadow-sm hover:shadow-md transition-shadow group animate-in fade-in slide-in-from-left-4 duration-300 relative";
+                
+                // Escape simple quotes for the onclick string
+                const safeName = data.name.replace(/'/g, "\\'");
+                
+                item.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="cursor-pointer flex-1" onclick="window.dispatchEvent(new CustomEvent('panMap', {detail: {lat: ${data.lat}, lon: ${data.lon}} }))">
+                            <h3 class="font-semibold text-gray-800 text-sm">${data.name}</h3>
+                            <p class="text-[10px] text-gray-500 line-clamp-2 mt-0.5 leading-tight">${data.address}</p>
+                        </div>
+                        <div class="flex items-center gap-1 ml-2">
+                            <button onclick="window.dispatchEvent(new CustomEvent('editLoc', {detail: {id: '${id}', name: '${safeName}'} }))" class="text-gray-300 hover:text-indigo-500 transition-colors p-1" title="Rename">
+                                <i data-lucide="pencil" class="w-3 h-3"></i>
+                            </button>
+                            <button onclick="window.dispatchEvent(new CustomEvent('deleteLoc', {detail: '${id}'}))" class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Delete">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+                locationsList.appendChild(item);
+            });
+            
+            lucide.createIcons();
+        }
+
+
+        // --- 5. Helper Functions ---
+
+        async function getCoordinates(query) {
+            // Helper function to query Nominatim with Philippines restriction
+            // We use 'countrycodes=ph' to restrict results strictly to Philippines
+            const fetchNominatim = async (q) => {
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=ph&limit=1`;
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    return data.length > 0 ? data[0] : null;
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            // Attempt 1: Search exact query
+            let result = await fetchNominatim(query);
+            if (result) return result;
+
+            // Attempt 2: Smart Fallback
+            // If the user inputs "Building Name, Street, City", OpenStreetMap might not know the building.
+            // We strip the first part (everything before the first comma) to find the street/city address.
+            if (query.includes(',')) {
+                const parts = query.split(',');
+                if (parts.length > 1) {
+                    // Remove first part, search for the rest
+                    const fallbackQuery = parts.slice(1).join(',').trim();
+                    console.log("Exact match failed. Trying fallback:", fallbackQuery);
+                    result = await fetchNominatim(fallbackQuery);
+                }
+            }
+            
+            return result;
+        }
+
+        async function addLocation(e) {
+            e.preventDefault();
+            const queryText = locationInput.value.trim();
+            
+            if (!queryText) return;
+
+            // UI Loading state
+            const btn = locationForm.querySelector('button');
+            const originalBtnText = btn.innerHTML;
+            btn.innerHTML = `<span class="animate-spin mr-2">⟳</span> Finding...`;
+            btn.disabled = true;
+            errorMsg.classList.add('hidden');
+
+            const result = await getCoordinates(queryText);
+
+            if (result) {
+                const lat = parseFloat(result.lat);
+                const lon = parseFloat(result.lon);
+                
+                // Use the search result's name for accuracy, but prefer user's input name if it was a fallback
+                // For simplicity, we use the display name from the map data
+                const displayName = result.display_name.split(',')[0];
+                const fullAddress = result.display_name;
+
+                try {
+                    // SAVE TO FIRESTORE
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'rentmap'), {
+                        name: displayName,
+                        address: fullAddress,
+                        lat: lat,
+                        lon: lon,
+                        createdAt: serverTimestamp(),
+                        createdBy: currentUser.uid
+                    });
+                    
+                    // Fly to location
+                    map.flyTo([lat, lon], 16, { animate: true, duration: 1.5 }); // Zoom in closer (16) for specific addresses
+                    locationInput.value = '';
+
+                } catch (err) {
+                    console.error("Error adding document: ", err);
+                    errorMsg.textContent = "Could not save location. Check connection.";
+                    errorMsg.classList.remove('hidden');
+                }
+            } else {
+                errorMsg.textContent = "Location not found. Try entering just the street or barangay.";
+                errorMsg.classList.remove('hidden');
+            }
+
+            // Restore button
+            btn.innerHTML = originalBtnText;
+            btn.disabled = false;
+        }
+
+        // --- 6. Global Event Listeners (Window bridge) ---
+        
+        window.resetMap = () => {
+            map.flyTo(PH_CENTER, PH_ZOOM);
+        };
+
+        // Custom events to handle interactions from HTML string
+        window.addEventListener('panMap', (e) => {
+            const { lat, lon } = e.detail;
+            map.flyTo([lat, lon], 16);
+        });
+
+        // Event listener for renaming locations
+        window.addEventListener('editLoc', async (e) => {
+            const { id, name } = e.detail;
+            if (!currentUser) return;
+
+            const newName = prompt("Rename location:", name);
+            if (newName && newName.trim() !== "" && newName !== name) {
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rentmap', id), {
+                        name: newName.trim()
+                    });
+                    // UI updates automatically via onSnapshot
+                } catch (err) {
+                    console.error("Error updating:", err);
+                    alert("Could not rename item.");
+                }
+            }
+        });
+
+        window.addEventListener('deleteLoc', async (e) => {
+            const docId = e.detail;
+            if (!currentUser) return;
+            
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'rentmap', docId));
+                // UI updates automatically via onSnapshot
+            } catch (err) {
+                console.error("Error deleting:", err);
+                alert("Could not delete item.");
+            }
+        });
+
+        locationForm.addEventListener('submit', addLocation);
+
+    </script>
+</body>
+</html>
